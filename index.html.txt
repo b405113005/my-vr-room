@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>醫療數位孿生 - 沉浸式智慧手術室</title>
+    <!-- A-Frame 核心庫 -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <!-- 環境組件 -->
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif; }
+        
+        /* HUD 資訊面板 */
+        #hud-overlay {
+            position: absolute; top: 25px; left: 25px; width: 280px;
+            background: rgba(5, 15, 25, 0.9); color: #00f2ff;
+            padding: 20px; border-left: 5px solid #00f2ff; border-radius: 4px;
+            z-index: 100; pointer-events: none;
+            box-shadow: 0 0 25px rgba(0, 242, 255, 0.4);
+        }
+
+        /* 玻璃擬態面板 (Glassmorphism UI) */
+        .glass-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 350px; background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px; color: white; padding: 25px;
+            display: none; z-index: 1000; opacity: 0;
+            transition: opacity 0.4s ease-in-out;
+        }
+
+        .glass-panel h3 { margin: 0 0 10px 0; color: #00f2ff; border-bottom: 1px solid rgba(0, 242, 255, 0.3); padding-bottom: 10px; }
+        .close-btn { position: absolute; top: 10px; right: 15px; cursor: pointer; font-size: 24px; color: #aaa; border: none; background: none; }
+        .close-btn:hover { color: white; }
+
+        #vr-hint {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 40, 60, 0.7); color: #fff;
+            padding: 10px 20px; border-radius: 30px; font-size: 13px; z-index: 100;
+            border: 1px solid rgba(0, 242, 255, 0.2);
+        }
+        
+        /* 啟動遮罩 */
+        #audio-starter {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,10,20,0.95); z-index: 9999; display: flex;
+            flex-direction: column; justify-content: center; align-items: center; 
+            color: #00f2ff; cursor: pointer; text-align: center;
+        }
+        .start-btn {
+            margin-top: 20px; padding: 15px 30px; border: 2px solid #00f2ff;
+            background: transparent; color: #00f2ff; font-size: 1.2em;
+            cursor: pointer; transition: 0.3s;
+        }
+        .start-btn:hover { background: #00f2ff; color: #000; }
+    </style>
+</head>
+<body>
+
+    <div id="audio-starter" onclick="startExperience()">
+        <h1 style="letter-spacing: 5px;">SMART O.R. VR</h1>
+        <p>系統就緒，準備同步數位孿生場景</p>
+        <button class="start-btn">進入手術室</button>
+    </div>
+
+    <div id="hud-overlay">
+        <h2 style="margin: 0 0 10px 0; font-size: 1.1em; letter-spacing: 1px;">DIGITAL TWIN: OR-01</h2>
+        <div id="vital-data" style="font-family: monospace; font-size: 0.9em; line-height: 1.5;">
+            STATUS: CONNECTED<br>
+            HR: 72 BPM | SpO2: 99%
+        </div>
+    </div>
+
+    <div id="info-panel" class="glass-panel">
+        <button class="close-btn" onclick="closePanel()">&times;</button>
+        <h3 id="panel-title">設備詳細資訊</h3>
+        <p id="panel-content" style="line-height: 1.6; font-size: 0.95em;">內容載入中...</p>
+    </div>
+
+    <div id="vr-hint">WASD：移動醫師 | 滑鼠：旋轉視角 | 點擊全息球查看資訊</div>
+
+    <a-scene shadow="type: pcfsoft" renderer="antialias: true; colorManagement: true; exposure: 1.2;">
+        
+        <a-assets>
+            <a-mixin id="metal-pbr" material="metalness: 0.8; roughness: 0.2; color: #cccccc"></a-mixin>
+            <a-mixin id="hologram-orb" 
+                geometry="primitive: sphere; radius: 0.12" 
+                material="color: #00f2ff; opacity: 0.5; transparent: true; emissive: #00f2ff; emissiveIntensity: 1.5"
+                animation="property: scale; to: 1.3 1.3 1.3; dir: alternate; dur: 1200; loop: true"
+                animation__rotation="property: rotation; to: 0 360 0; dur: 4000; easing: linear; loop: true"></a-mixin>
+            
+            <audio id="hvac-sound" src="https://cdn.pixabay.com/audio/2022/03/10/audio_517702877a.mp3" preload="auto"></audio>
+            <audio id="beep-sound" src="https://cdn.pixabay.com/audio/2021/08/04/audio_06d670f031.mp3" preload="auto"></audio>
+        </a-assets>
+
+        <!-- 背景環境 -->
+        <a-entity environment="preset: logic; shadow: true; groundColor: #1a1a1a; grid: lines; gridColor: #222;"></a-entity>
+        <a-light type="ambient" intensity="0.5"></a-light>
+        <a-entity id="ambient-hvac" sound="src: #hvac-sound; autoplay: false; loop: true; volume: 0.2" position="0 5 0"></a-entity>
+
+        <!-- --- 外科醫師角色模型 (WASD控制) --- -->
+        <a-entity id="surgeon-player" position="0 0 4">
+            <a-entity id="surgeon-mesh">
+                <a-box width="0.5" height="0.8" depth="0.25" color="#3a78a1" position="0 0.8 0" shadow></a-box>
+                <a-box width="0.2" height="0.6" depth="0.2" color="#3a78a1" position="-0.12 0.3 0" shadow></a-box>
+                <a-box width="0.2" height="0.6" depth="0.2" color="#3a78a1" position="0.12 0.3 0" shadow></a-box>
+                <a-box width="0.22" height="0.1" depth="0.32" color="#ffffff" position="-0.12 0.05 0.05"></a-box>
+                <a-box width="0.22" height="0.1" depth="0.32" color="#ffffff" position="0.12 0.05 0.05"></a-box>
+                <a-sphere radius="0.2" color="#f5cba7" position="0 1.4 0" shadow>
+                    <a-cylinder radius="0.21" height="0.1" color="#3a78a1" position="0 0.12 0"></a-cylinder>
+                    <a-box width="0.18" height="0.1" depth="0.08" color="#ffffff" position="0 -0.05 0.16"></a-box>
+                </a-sphere>
+            </a-entity>
+            
+            <a-entity id="camera-rig" position="0 2.2 2" rotation="-15 0 0">
+                <a-camera look-controls="pointerLockEnabled: false" wasd-controls="enabled: false">
+                    <a-cursor id="main-cursor" color="#00f2ff" raycaster="objects: .clickable" animation__click="property: scale; startEvents: click; from: 0.1 0.1 0.1; to: 1 1 1; dur: 150"></a-cursor>
+                </a-camera>
+            </a-entity>
+        </a-entity>
+
+        <!-- --- 手術室核心區域 --- -->
+        
+        <!-- 手術台 -->
+        <a-entity id="surgical-bed-container" position="0 0 -0.5">
+            <a-box width="1" height="0.15" depth="2.4" color="#2c5a85" position="0 0.85 0" shadow></a-box>
+            <a-box mixin="metal-pbr" width="0.6" height="0.8" depth="0.6" position="0 0.4 0" shadow></a-box>
+            <a-entity mixin="hologram-orb" position="0 1.3 0" class="clickable" 
+                onclick="showNote('智慧型手術台', '具備多軸傾斜功能，目前已鋪設藍色無菌布。')">
+            </a-entity>
+        </a-entity>
+
+        <!-- 麻醉工作站 -->
+        <a-entity id="anesthesia-machine" position="-2.2 0 0" rotation="0 40 0">
+            <a-box width="0.9" height="1.3" depth="0.7" color="#444" position="0 0.65 0" shadow></a-box>
+            <a-box width="0.7" height="0.4" depth="0.1" color="#111" position="0 1.5 0.2" material="emissive: #00ff00; emissiveIntensity: 0.3">
+                <a-text value="HR: 72\nSPO2: 99%" align="center" width="1.8" color="#00ff00" position="0 0 0.06"></a-text>
+            </a-box>
+            <a-cylinder radius="0.08" height="0.4" color="#ffcc00" position="-0.2 0.8 0.4"></a-cylinder>
+            <a-cylinder radius="0.08" height="0.4" color="#9933ff" position="0.1 0.8 0.4"></a-cylinder>
+            <a-entity id="heartbeat-sound" sound="src: #beep-sound; autoplay: false; loop: true; volume: 0.15; rolloffFactor: 3" position="0 1 0"></a-entity>
+            <a-entity mixin="hologram-orb" position="0 1.8 0" class="clickable" 
+                onclick="showNote('麻醉監測終端', '患者生命徵象穩定。')">
+            </a-entity>
+        </a-entity>
+
+        <!-- 器械桌 -->
+        <a-entity id="mayo-stand" position="1.3 0 -1">
+            <a-cylinder mixin="metal-pbr" radius="0.03" height="1" position="0 0.5 0"></a-cylinder>
+            <a-box mixin="metal-pbr" width="0.8" height="0.03" depth="0.5" position="-0.2 1 0">
+                <a-box width="0.02" height="0.01" depth="0.2" color="#aaa" position="-0.2 0.03 0"></a-box>
+                <a-box width="0.02" height="0.01" depth="0.15" color="#aaa" position="0 0.03 0.1"></a-box>
+            </a-box>
+            <a-entity mixin="hologram-orb" position="-0.2 1.3 0" class="clickable" 
+                onclick="showNote('器械桌', '已備妥止血鉗、鑷子與外科手術刀。')">
+            </a-entity>
+        </a-entity>
+
+        <!-- --- 新增設備 --- -->
+
+        <!-- 生理監測塔 (Monitor Tower) -->
+        <a-entity position="2 0 -3" rotation="0 -30 0">
+            <a-box width="0.8" height="0.2" depth="0.8" color="#333" position="0 0.1 0"></a-box>
+            <a-cylinder radius="0.05" height="2" color="#777" position="0 1 0"></a-cylinder>
+            <!-- 腹腔鏡主螢幕 -->
+            <a-box width="1.2" height="0.7" depth="0.1" color="#000" position="0 1.8 0.1">
+                <a-plane width="1.1" height="0.6" position="0 0 0.06" color="#000">
+                     <a-text value="LAPAROSCOPIC VIEW\nSIGNAL: OK" align="center" width="2" color="#00f2ff"></a-text>
+                </a-plane>
+            </a-box>
+            <!-- 下層設備盒 -->
+            <a-box width="0.7" height="0.3" depth="0.5" color="#555" position="0 1.2 0"></a-box>
+            <a-entity mixin="hologram-orb" position="0 2.3 0" class="clickable" 
+                onclick="showNote('影像監測塔', '整合腹腔鏡與多參數監視器，支援 4K 影像輸出。')">
+            </a-entity>
+        </a-entity>
+
+        <!-- C-Arm 移動式 X光機 -->
+        <a-entity position="-3 0 -1.5" rotation="0 110 0">
+            <a-box width="1.5" height="0.4" depth="0.8" color="#ddd" position="0 0.2 0"></a-box>
+            <!-- C型懸臂 -->
+            <a-torus radius="1.2" tube="0.08" arc="180" color="#eee" position="0 1.2 0" rotation="0 0 90"></a-torus>
+            <!-- 發射頭與接收端 -->
+            <a-cylinder radius="0.2" height="0.3" color="#ccc" position="0 2.4 0"></a-cylinder>
+            <a-cylinder radius="0.2" height="0.3" color="#ccc" position="0 0 0"></a-cylinder>
+            <a-entity mixin="hologram-orb" position="0 2.8 0" class="clickable" 
+                onclick="showNote('移動式 C-Arm', '用於術中即時放射線影像檢測。')">
+            </a-entity>
+        </a-entity>
+
+        <!-- 氣體供應塔 (Pendent) -->
+        <a-entity position="-1.5 3.8 0.5">
+            <a-cylinder radius="0.1" height="1.5" color="#aaa" position="0 -0.75 0"></a-cylinder>
+            <a-box width="0.5" height="0.8" depth="0.5" color="#eee" position="0 -1.5 0">
+                <!-- 壓力錶 -->
+                <a-circle radius="0.05" color="#fff" position="-0.1 0.1 0.26"></a-circle>
+                <a-circle radius="0.05" color="#fff" position="0.1 0.1 0.26"></a-circle>
+            </a-box>
+        </a-entity>
+
+        <!-- 醫療櫃與電腦站 (靠牆) -->
+        <a-entity position="4 0 2" rotation="0 -90 0">
+            <a-box width="3" height="2.2" depth="0.6" color="#fff" position="0 1.1 0"></a-box>
+            <!-- 玻璃窗 -->
+            <a-plane width="2.8" height="1" position="0 1.4 0.31" material="color: #88ccff; opacity: 0.3; transparent: true"></a-plane>
+            <!-- 旁邊的電腦台 -->
+            <a-box width="1" height="0.05" depth="0.6" color="#ddd" position="2.2 0.9 0"></a-box>
+            <a-box width="0.6" height="0.4" depth="0.05" color="#222" position="2.2 1.3 -0.25" rotation="-10 0 0"></a-box>
+        </a-entity>
+
+        <!-- 無影燈 -->
+        <a-entity position="0 3.8 -0.5">
+            <a-cylinder radius="0.5" height="0.08" color="#fff" material="emissive: #fff; emissiveIntensity: 2"></a-cylinder>
+            <a-light type="spot" intensity="2" distance="10" angle="45" castShadow="true" position="0 -0.2 0" rotation="-90 0 0"></a-light>
+        </a-entity>
+
+        <!-- 手術中警示燈 -->
+        <a-entity position="0 3 -5.8">
+            <a-box width="1.2" height="0.4" depth="0.1" color="#222">
+                <a-plane width="1.1" height="0.3" position="0 0 0.06" color="#ff0000" material="emissive: #ff0000; emissiveIntensity: 1.2">
+                    <a-text value="IN OPERATION" align="center" width="3"></a-text>
+                </a-plane>
+            </a-box>
+        </a-entity>
+
+        <!-- 地板 -->
+        <a-plane rotation="-90 0 0" width="30" height="30" color="#1a1a1a" material="roughness: 0.2; metalness: 0.3"></a-plane>
+
+    </a-scene>
+
+    <script>
+        function startExperience() {
+            document.getElementById('audio-starter').style.display = 'none';
+            try {
+                document.getElementById('ambient-hvac').components.sound.playSound();
+                document.getElementById('heartbeat-sound').components.sound.playSound();
+            } catch (e) {}
+        }
+
+        function showNote(title, content) {
+            const panel = document.getElementById('info-panel');
+            document.getElementById('panel-title').innerText = title;
+            document.getElementById('panel-content').innerText = content;
+            panel.style.display = 'block';
+            setTimeout(() => { panel.style.opacity = '1'; }, 50);
+            const sfx = new Audio('https://cdn.pixabay.com/audio/2022/03/15/audio_2267866383.mp3');
+            sfx.volume = 0.3;
+            sfx.play().catch(() => {});
+        }
+
+        function closePanel() {
+            const panel = document.getElementById('info-panel');
+            panel.style.opacity = '0';
+            setTimeout(() => { panel.style.display = 'none'; }, 400);
+        }
+
+        // --- 移動控制邏輯 ---
+        const surgeon = document.getElementById('surgeon-player');
+        const moveSpeed = 0.1;
+        const keys = {};
+        
+        window.addEventListener('keydown', (e) => { keys[e.code] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        function updateMovement() {
+            const currentPos = surgeon.getAttribute('position');
+            let dx = 0, dz = 0;
+
+            if (keys['KeyW'] || keys['ArrowUp']) dz -= moveSpeed;
+            if (keys['KeyS'] || keys['ArrowDown']) dz += moveSpeed;
+            if (keys['KeyA'] || keys['ArrowLeft']) dx -= moveSpeed;
+            if (keys['KeyD'] || keys['ArrowRight']) dx += moveSpeed;
+
+            if (dx !== 0 || dz !== 0) {
+                let nextX = currentPos.x + dx;
+                let nextZ = currentPos.z + dz;
+                
+                const isOutOfBounds = Math.abs(nextX) > 12 || Math.abs(nextZ) > 12;
+                const distToTable = Math.sqrt(Math.pow(nextX, 2) + Math.pow(nextZ - (-0.5), 2));
+                
+                if (!isOutOfBounds && distToTable > 1.2) {
+                    surgeon.setAttribute('position', { x: nextX, y: currentPos.y, z: nextZ });
+                }
+            }
+            requestAnimationFrame(updateMovement);
+        }
+
+        updateMovement();
+
+        setInterval(() => {
+            const hr = 70 + Math.floor(Math.random() * 6);
+            document.getElementById('vital-data').innerHTML = `STATUS: CONNECTED<br>HR: ${hr} BPM | SpO2: 99%`;
+        }, 3000);
+    </script>
+</body>
+</html>
+
